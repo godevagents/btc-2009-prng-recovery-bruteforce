@@ -1,0 +1,175 @@
+# Парсер на основе «крипто-археологии». Портрет-конфигурация генерации энтропии пользователя Intel Core 2 Quad Q6600 / 4GB DDR2 RAM / Windows XP Professional SP3.
+
+START_HKEY_PERFORMANCE_DATA
+START_SETTINGS_HKEY
+[HKEY_PERFORMANCE_DATA - RegQueryValueEx] - RandAddSeed
+**1. Принцип целостности цепочки (N,M,K):**
+  **PERF_OBJECT_TYPE (N):** Каждый новый объект начинается строго на 8-байтовой границе. Если предыдущий объект с его данными закончился на 131-м байте, Windows добавит 5 байтов «пустоты» (00), чтобы следующий N+1 объект начался со 136-го байта.
+  **PERF_COUNTER_DEFINITION (M):** Эти структуры имеют фиксированный размер (в XP — 40 байт). Поскольку 40 кратно 8, они идут плотным стеком друг за другом без дополнительных прослоек.
+  **PERF_INSTANCE_DEFINITION (K):** Длина этой структуры зависит от длины имени экземпляра (например, "bitcoin")
+    - **Правило:** Поле ByteLength в заголовке экземпляра обязано включать в себя байты выравнивания. Если заголовок + имя занимают 35 байт, ByteLength будет записан как 28 00 00 00 (40 в десятичной системе), где последние 5 байт — мусор или нули.
+**2. Догма PERF_COUNTER_BLOCK:** Данные счетчиков, следующие за экземпляром, также выравниваются по 8 байтам. Это гарантирует, что 64-битные счетчики (например, PerfTime) будут прочитаны процессором Intel Q6600 за один цикл обращения к памяти.
+3. **Системный вызов RegQueryValueEx с ключом Global никогда не возвращает фиксированное количество байт.**
+4. **Прикладные константы для Q6600 (XP SP3):**
+  - **Alignment Padding:** В 2009 году на 32-битной XP выравнивание часто заполнялось «мусором» из памяти (стека), а не нулями. Это критически важно для энтропии Bitcoin: если ты занулишь паддинг, ты потеряешь часть случайности, которая была в реальности.
+  - **SystemNameOffset:** В PERF_DATA_BLOCK это всегда 40 00 00 00. Само имя компьютера (например, USER-PC) записывается в Unicode сразу после заголовка, и его длина SystemNameLength также влияет на смещение первого объекта.
+  - **Variable Entropy:** Поля PerfTime, PerfTime100nSec и SystemTime должны рассчитываться в реальном времени. Если SystemTime — это фиксированная дата (3 января 2009), то PerfTime (тики процессора) должен инкрементироваться между вызовами.
+5. **(Alignment Padding):** Любая структура (Object, Instance, CounterBlock) дополняется байтами до границы 8 байт. В Windows XP до 2010 г. паддинг содержит неинициализированные данные (stack/heap garbage).
+6. 5. **Ньюанс HKEY_PERFORMANCE_DATA:** сбор этих данных был настолько медленным, что Microsoft кэшировала часть результатов. При генерации wallet.dat первым клиентом Bitcoin (0.1.0), именно задержки при обращении к этому ключу реестра создавали характерные «фризы» интерфейса.
+END_SETTINGS_HKEY
+
+START_HKEY_ALGORYTHM
+```python
+import struct
+import random
+from datetime import datetime, timedelta
+
+# --- Forensic Constants (2009 Era) ---
+Q6600_CORES = 4
+XP_BASE_PROCS = [
+    "System", "smss.exe", "csrss.exe", "winlogon.exe", 
+    "services.exe", "lsass.exe", "svchost.exe", "explorer.exe", "bitcoin.exe"
+]
+
+def align_8(size):
+    return (size + 7) & ~7
+
+def get_dirty_padding(length):
+    """Имитация мусора из ОЗУ Windows XP (stack/heap garbage)"""
+    if length <= 0: return b''
+    # 0xCC - маркер INT3, часто встречается в памяти XP SP3 (отладка/стек)
+    return bytes([random.choice([0, 0, random.getrandbits(8), 0xCC]) for _ in range(length)])
+
+def get_forensic_objects_config():
+    """Конфигурация объектов согласно END_SCTRUCTURE"""
+    return [
+        {"id": 2,   "name": "System",    "c_count": 18, "inst": []},
+        {"id": 4,   "name": "Memory",    "c_count": 25, "inst": []},
+        {"id": 238, "name": "Processor", "c_count": 12, "inst": [str(i) for i in range(Q6600_CORES)] + ["_Total"]},
+        {"id": 230, "name": "Process",   "c_count": 28, "inst": XP_BASE_PROCS + ["svchost.exe"] * 3},
+        {"id": 272, "name": "Network",   "c_count": 14, "inst": ["Intel(R) PRO/1000"]},
+    ]
+
+def generate_single_object(obj_cfg, p_time, p_freq):
+    """Сборка PERF_OBJECT_TYPE с соблюдением 8-байтового выравнивания"""
+    obj_id = obj_cfg["id"]
+    counters_count = obj_cfg["c_count"]
+    instances_list = obj_cfg["inst"]
+    
+    # 1. Сборка PERF_COUNTER_DEFINITION (Всегда 40 байт, кратно 8)
+    counters_buf = bytearray()
+    curr_data_offset = 8  
+    
+    for i in range(counters_count):
+        counters_buf += struct.pack('<I', 40)               # 3.1 ByteLength
+        counters_buf += struct.pack('<I', obj_id + (i*2)+2) # 3.2 NameTitleIndex
+        counters_buf += struct.pack('<I', 0)                # 3.3 Reserved
+        counters_buf += struct.pack('<I', obj_id + (i*2)+3) # 3.4 HelpTitleIndex
+        counters_buf += struct.pack('<I', 0)                # 3.5 Reserved
+        counters_buf += struct.pack('<i', 0)                # 3.6 DefaultScale
+        counters_buf += struct.pack('<I', 100)              # 3.7 DetailLevel
+        counters_buf += struct.pack('<I', 0x00010400)       # 3.8 CounterType (PERF_COUNTER_RAWCOUNT)
+        counters_buf += struct.pack('<I', 8)                # 3.9 CounterSize (64-bit)
+        counters_buf += struct.pack('<I', curr_data_offset) # 3.10 CounterOffset
+        curr_data_offset += 8
+
+    # 2. Сборка экземпляров и блоков данных
+    instances_buf = bytearray()
+    if instances_list:
+        for name in instances_list:
+            name_bin = name.encode('utf-16le') + b'\x00\x00'
+            name_len_aligned = align_8(len(name_bin))
+            inst_def_len = 24 + name_len_aligned 
+            
+            # Заголовок экземпляра (4.1 - 4.6)
+            instances_buf += struct.pack('<IiiIII', inst_def_len, 0, 0, 0xFFFFFFFF, 24, len(name_bin))
+            # Имя + грязный паддинг (4.7)
+            instances_buf += name_bin + get_dirty_padding(name_len_aligned - len(name_bin))
+            
+            # PERF_COUNTER_BLOCK (Выравнивание данных по 8 байт)
+            block_len = align_8(8 + (counters_count * 8))
+            instances_buf += struct.pack('<I', block_len)
+            instances_buf += get_dirty_padding(block_len - 4) 
+    else:
+        # Singleton объект (как Memory)
+        block_len = align_8(8 + (counters_count * 8))
+        instances_buf += struct.pack('<I', block_len)
+        instances_buf += get_dirty_padding(block_len - 4)
+
+    # 3. Заголовок PERF_OBJECT_TYPE
+    header_len = 64
+    def_len = header_len + len(counters_buf)
+    total_obj_len = def_len + len(instances_buf)
+    
+    obj_header = struct.pack('<IIIIIIiIIQQ',
+        total_obj_len, def_len, header_len, 
+        obj_id, obj_id + 1, 100, counters_count, 
+        -1, len(instances_list) if instances_list else -1, 
+        0, p_time, p_freq
+    )
+    
+    return obj_header + counters_buf + instances_buf
+
+def generate_hkey_performance_data(seconds_passed=0):
+    """Имитация RegQueryValueEx для SATOSHI-PC в диапазоне 09.01.2009 - 20.01.2009"""
+    
+    # --- Генерация случайного SystemTime в заданном диапазоне ---
+    start_date = datetime(2009, 1, 9)
+    # Выбираем случайный день в диапазоне 9-20 января
+    random_day = random.randint(9, 20)
+    random_time = timedelta(
+        hours=random.randint(0, 23),
+        minutes=random.randint(0, 59),
+        seconds=random.randint(0, 59),
+        milliseconds=random.randint(0, 999)
+    )
+    current_dt = datetime(2009, 1, random_day) + random_time
+    
+    # SYSTEMTIME: wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds
+    # В Windows SYSTEMTIME: Sunday = 0, Monday = 1... 
+    # В Python weekday(): Monday = 0, Sunday = 6
+    win_day_of_week = (current_dt.weekday() + 1) % 7
+    
+    st_tuple = (
+        current_dt.year, 
+        current_dt.month, 
+        win_day_of_week, 
+        current_dt.day,
+        current_dt.hour, 
+        current_dt.minute, 
+        current_dt.second, 
+        current_dt.microsecond // 1000
+    )
+
+    # Временные метки производительности
+    PERF_FREQ = 3579545 
+    p_time = 0xC00505E4 + (seconds_passed * PERF_FREQ)
+    p_100ns = 128755000000000000 + (seconds_passed * 10_000_000)
+    
+    # Подготовка имени системы (Unicode)
+    sys_name = "SATOSHI-PC".encode('utf-16le') + b'\x00\x00'
+    sys_name_padded_len = align_8(len(sys_name))
+    sys_name_block = sys_name + get_dirty_padding(sys_name_padded_len - len(sys_name))
+    
+    # Генерация объектов
+    objects_data = b"".join([generate_single_object(o, p_time, PERF_FREQ) for o in get_forensic_objects_config()])
+    
+    # Сборка PERF_DATA_BLOCK (1.1 - 1.14)
+    total_len = 64 + len(sys_name_block) + len(objects_data)
+    
+    # Заголовок (Signature 'PERF', LittleEndian=1, Version=1, Revision=1)
+    header = struct.pack('<8sIIIIII', b'P\x00E\x00R\x00F\x00', 1, 1, 1, total_len, 64, 5)
+    header += struct.pack('<I', 0xFFFFFFFF)    # DefaultObject
+    header += struct.pack('<HHHHHHHH', *st_tuple) # Динамический SystemTime
+    header += struct.pack('<QQQ', p_time, PERF_FREQ, p_100ns)
+    header += struct.pack('<II', len(sys_name), 64) # SystemNameLength, SystemNameOffset
+    
+    return header + sys_name_block + objects_data
+
+# Тестовый запуск
+raw_dump = generate_hkey_performance_data(seconds_passed=random.randint(0, 1000))
+print(f"Generated Dump Size: {len(raw_dump)} bytes")
+print(f"Target Date Range: 09.01.2009 - 20.01.2009")
+```
+END_HKEY_ALGORYTHM
+END_HKEY_PERFORMANCE_DATA

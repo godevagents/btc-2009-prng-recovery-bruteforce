@@ -1,0 +1,84 @@
+# ==========================================
+# PRNG-State-Recovery-2009 .gitignore
+# ==========================================
+
+# ---------------------
+# Python
+# ---------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+*.db
+*.sqlite3
+
+# ---------------------
+# CMake & Build
+# ---------------------
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+compile_commands.json
+build/
+*.o
+*.obj
+*.dylib
+*.a
+*.lib
+*.out
+
+# ---------------------
+# IDEs
+# ---------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---------------------
+# Cache
+# ---------------------
+logs/
+.cache/
+
+# ---------------------
+# IDEs
+# ---------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---------------------
+# Logs & Cache
+# ---------------------
+logs/
+*.log
+.cache/
+
+# ---------------------
+# Address Lists (приватные данные)
+# ---------------------
+adr_list/*.txt
+!adr_list/*.md
