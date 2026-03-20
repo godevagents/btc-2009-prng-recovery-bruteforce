@@ -298,20 +298,6 @@ python "quick start/start.py"
 | `--share` | false | Создать публичную ссылку |
 | `--server-name` | 127.0.0.1 | Имя сервера |
 
-### Процесс запуска
-
-1. **Проверка модулей**
-   - Скрипт проверяет наличие `.so` файлов в директории `lib/`
-   - Ожидаемые модули: `address_matcher_cpp`, `batch_gen_cpp`, `core_cpp`, `entropy_engine_cpp`, `entropy_pipeline_cache_cpp`, `getbitmaps_cpp`, `hkey_performance_data_cpp`, `rand_poll_cpp`, `wallet_dat_cpp`
-
-2. **Автокомпиляция** (при отсутствии модулей)
-   - CMake конфигурация и сборка через [`quick start/compilation.py`](quick%20start/compilation.py)
-   - Копирование `.so` в директорию `lib/`
-
-3. **Запуск Gradio**
-   - Создание мониторинг-интерфейса через [`src/monitor/gradio_app.py`](src/monitor/gradio_app.py)
-   - Логирование в `app.log`
-
 ### Установка зависимостей
 
 ```bash
@@ -323,8 +309,6 @@ pip install pybind11 gradio psutil
 ```
 
 ---
-
-## Зависимости
 
 ### Python зависимости
 
